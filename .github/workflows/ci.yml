@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go bridge (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      CGO_ENABLED: "1"
+    defaults:
+      run:
+        working-directory: whatsapp-bridge
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: whatsapp-bridge/go.mod
+          cache-dependency-path: whatsapp-bridge/go.sum
+
+      - name: Set up MinGW for CGO
+        if: runner.os == 'Windows'
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+  python:
+    name: Python MCP server (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: whatsapp-mcp-server
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: whatsapp-mcp-server/uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Compile Python sources
+        run: >-
+          uv run python -m py_compile
+          main.py whatsapp.py macos_contacts.py audio.py outbound_confirmation.py transcription.py
+          ../scripts/run_bridge.py
+          ../scripts/install_macos_launch_agent.py
+          ../scripts/verify_macos_profile.py
+
+      - name: Test
+        run: uv run python -m unittest discover -s tests -v
+
+      - name: Verify optional Whisper dependency
+        run: uv run --extra whisper python -c "import faster_whisper"
+
+  macos-contacts:
+    name: macOS Contacts helper
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Compile native helper
+        run: >-
+          xcrun swiftc
+          whatsapp-mcp-server/macos-contacts-helper/main.swift
+          -framework Contacts
+          -o "$RUNNER_TEMP/WhatsAppMCPContacts"
