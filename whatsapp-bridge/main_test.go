@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"go.mau.fi/whatsmeow"
@@ -29,9 +30,10 @@ func TestDefaultBridgePortRejectsInvalidValue(t *testing.T) {
 }
 
 func TestDefaultStoreDir(t *testing.T) {
-	t.Setenv("WHATSAPP_STORE_DIR", "/tmp/whatsapp-mcp-test-store")
-	if got := defaultStoreDir(); got != "/tmp/whatsapp-mcp-test-store" {
-		t.Fatalf("defaultStoreDir() = %q", got)
+	configured := "/tmp/whatsapp-mcp-test-store"
+	t.Setenv("WHATSAPP_STORE_DIR", configured)
+	if got, want := defaultStoreDir(), filepath.Clean(configured); got != want {
+		t.Fatalf("defaultStoreDir() = %q, want %q", got, want)
 	}
 }
 
