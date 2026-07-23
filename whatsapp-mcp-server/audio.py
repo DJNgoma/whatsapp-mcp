@@ -49,7 +49,7 @@ def convert_to_opus_ogg(input_file, output_file=None, bitrate="32k", sample_rate
     
     try:
         # Run the ffmpeg command and capture output
-        process = subprocess.run(
+        subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

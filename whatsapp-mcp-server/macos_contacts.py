@@ -82,6 +82,8 @@ def contacts_app_status() -> Dict[str, Any]:
 
 
 def search_macos_contacts(query: str, limit: int = 50) -> Tuple[List[Dict[str, Any]], str | None]:
+    if not query.strip():
+        return [], None
     if platform.system() != "Darwin":
         return [], "Contacts.app lookup is available only on macOS."
     if not HELPER_PATH.is_file():

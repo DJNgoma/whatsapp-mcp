@@ -209,6 +209,45 @@ func TestValidateMediaDownloadSize(t *testing.T) {
 	}
 }
 
+func TestUniqueMediaFilenamePreservesNormalMessageID(t *testing.T) {
+	for _, test := range []struct {
+		messageID string
+		want      string
+	}{
+		{"3EB0ABC123", "photo_3EB0ABC123.jpg"},
+		{"message-123", "photo_message-123.jpg"},
+		{"message_123", "photo_message_123.jpg"},
+	} {
+		if got := uniqueMediaFilename(test.messageID, "photo.jpg"); got != test.want {
+			t.Errorf("uniqueMediaFilename(%q) = %q, want %q", test.messageID, got, test.want)
+		}
+	}
+}
+
+func TestUniqueMediaFilenameContainsSourceFilename(t *testing.T) {
+	for _, filename := range []string{"../photo.jpg", `..\\photo.jpg`, "folder/child/photo.jpg"} {
+		got := uniqueMediaFilename("", filename)
+		if got != "photo.jpg" {
+			t.Errorf("uniqueMediaFilename(%q) = %q, want contained basename", filename, got)
+		}
+	}
+}
+
+func TestUniqueMediaFilenameContainsTraversalBearingMessageID(t *testing.T) {
+	for _, messageID := range []string{"../../outside", `..\\..\\outside`, "folder/child\\message"} {
+		got := uniqueMediaFilename(messageID, "photo.jpg")
+		if strings.ContainsAny(got, `/\\`) {
+			t.Errorf("uniqueMediaFilename(%q) retained a path separator: %q", messageID, got)
+		}
+		if filepath.Base(got) != got {
+			t.Errorf("uniqueMediaFilename(%q) escaped its filename component: %q", messageID, got)
+		}
+		if !strings.HasPrefix(got, "photo_") || !strings.HasSuffix(got, ".jpg") {
+			t.Errorf("uniqueMediaFilename(%q) = %q, want contained photo filename", messageID, got)
+		}
+	}
+}
+
 func makeOggPage(sequence uint32, granule uint64, payload []byte) []byte {
 	lacing := make([]byte, 0, len(payload)/255+1)
 	remaining := len(payload)

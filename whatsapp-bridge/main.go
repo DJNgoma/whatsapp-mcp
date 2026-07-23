@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
@@ -1061,12 +1062,51 @@ func downloadMedia(ctx context.Context, client *whatsmeow.Client, messageStore *
 }
 
 func uniqueMediaFilename(messageID, filename string) string {
-	if messageID == "" || filename == "" {
+	if filename == "" {
 		return filename
 	}
-	extension := filepath.Ext(filename)
-	base := strings.TrimSuffix(filepath.Base(filename), extension)
-	return fmt.Sprintf("%s_%s%s", base, messageID, extension)
+	filename = portableBaseName(filename)
+	if messageID == "" {
+		return filename
+	}
+	extension := path.Ext(filename)
+	base := strings.TrimSuffix(filename, extension)
+	return fmt.Sprintf("%s_%s%s", base, safeMediaFilenameComponent(messageID), extension)
+}
+
+func safeMediaFilenameComponent(value string) string {
+	const maxReadableBytes = 96
+
+	var sanitized strings.Builder
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' ||
+			character == '-' || character == '_' {
+			sanitized.WriteRune(character)
+		} else {
+			sanitized.WriteByte('_')
+		}
+	}
+
+	component := sanitized.String()
+	changed := component != value
+	if component == "" {
+		component = "message"
+		changed = true
+	}
+	if len(component) > maxReadableBytes {
+		component = component[:maxReadableBytes]
+		changed = true
+	}
+	if !changed {
+		return component
+	}
+
+	// Keep sanitized or truncated identifiers collision-resistant so distinct
+	// WhatsApp messages cannot overwrite one another after normalization.
+	digest := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%s-%x", component, digest[:8])
 }
 
 // Extract direct path from a WhatsApp media URL

@@ -57,9 +57,17 @@ func writeJSON<T: Encodable>(_ value: T) throws {
     FileHandle.standardOutput.write(Data("\n".utf8))
 }
 
+let arguments = Array(CommandLine.arguments.dropFirst())
+let trimmedQuery = (arguments.first ?? "")
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+if arguments.first != "--probe" && trimmedQuery.isEmpty {
+    try writeJSON([ContactResult]())
+    exit(0)
+}
+
 let store = CNContactStore()
 let (authorized, authorizationStatus) = requestAccess(to: store)
-let arguments = Array(CommandLine.arguments.dropFirst())
 
 if arguments.first == "--probe" {
     try writeJSON(ProbeResult(
@@ -77,7 +85,7 @@ guard authorized else {
     exit(2)
 }
 
-let query = (arguments.first ?? "").lowercased()
+let query = trimmedQuery.lowercased()
 let queryDigits = normalizedPhone(query)
 let requestedLimit = arguments.count > 1 ? Int(arguments[1]) ?? 50 : 50
 let limit = max(1, min(requestedLimit, 200))

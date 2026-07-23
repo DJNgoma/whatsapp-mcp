@@ -7,20 +7,20 @@ import (
 )
 
 func TestNormalizePhoneNumber(t *testing.T) {
-	if got := normalizePhoneNumber("+27 (82) 345-6789"); got != "27823456789" {
+	if got := normalizePhoneNumber("+999 (123) 456-789"); got != "999123456789" {
 		t.Fatalf("normalizePhoneNumber() = %q", got)
 	}
-	if got := normalizePhoneNumber("0027 82 345 6789"); got != "27823456789" {
+	if got := normalizePhoneNumber("00999 123 456 789"); got != "999123456789" {
 		t.Fatalf("normalizePhoneNumber() with international prefix = %q", got)
 	}
 }
 
 func TestParseUserJID(t *testing.T) {
-	jid, err := parseUserJID("+27823456789")
+	jid, err := parseUserJID("+999123456789")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if jid.User != "27823456789" || jid.Server != types.DefaultUserServer {
+	if jid.User != "999123456789" || jid.Server != types.DefaultUserServer {
 		t.Fatalf("unexpected JID: %s", jid)
 	}
 	if _, err = parseUserJID("120363000000000000@g.us"); err == nil {
@@ -36,13 +36,13 @@ func TestParseGroupJID(t *testing.T) {
 	if jid.Server != types.GroupServer {
 		t.Fatalf("unexpected group server: %s", jid.Server)
 	}
-	if _, err = parseGroupJID("27823456789@s.whatsapp.net"); err == nil {
+	if _, err = parseGroupJID("999123456789@s.whatsapp.net"); err == nil {
 		t.Fatal("expected direct-chat JID to be rejected as a group")
 	}
 }
 
 func TestParseUserJIDsDeduplicates(t *testing.T) {
-	jids, err := parseUserJIDs([]string{"+27823456789", "27823456789"})
+	jids, err := parseUserJIDs([]string{"+999123456789", "999123456789"})
 	if err != nil {
 		t.Fatal(err)
 	}

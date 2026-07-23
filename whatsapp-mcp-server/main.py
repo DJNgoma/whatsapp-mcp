@@ -74,6 +74,8 @@ def search_contacts(query: str) -> List[Dict[str, Any]]:
     Args:
         query: Search term to match against contact names or phone numbers
     """
+    if not query.strip():
+        return []
     contacts = whatsapp_search_contacts(query)
     return contacts
 
@@ -114,9 +116,11 @@ def search_contacts_chats_and_groups(
     """Search direct chats, groups, recent chats, and optional macOS contacts.
 
     Args:
-        query: Name or phone-number fragment. Use an empty string for recent chats.
+        query: Non-empty name or phone-number fragment.
         limit: Maximum number of unified results, from 1 to 100.
     """
+    if not query.strip():
+        return []
     return whatsapp_search_contacts_chats_and_groups(query, max(1, min(limit, 100)))
 
 

@@ -23,10 +23,6 @@ This repository is a maintained fork of [Luke Harries' original `whatsapp-mcp` p
 - Hardens media handling with collision-resistant downloads, portable filenames, correct document MIME metadata, and WhatsApp `FileName` support.
 - Adds locked Python dependencies, automated tests, race/static checks, and CI coverage across macOS, Linux, and Windows.
 
-Here is an example of the server connected to an MCP client:
-
-![WhatsApp MCP](./example-use.png)
-
 > *Caution:* as with many MCP servers, WhatsApp MCP is subject to [the lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/). Prompt injection could therefore lead to private data exfiltration. Keep the bridge bound to localhost, review tool calls, and require confirmation for outbound actions.
 
 ## Installation
@@ -336,6 +332,7 @@ After installing the `whisper` extra, use `transcribe_audio_message` with the sa
 - Read tools query the local `messages.db`. Use `bridge_status` to determine whether the bridge is connected; results may be stale while it is stopped or disconnected.
 - Sending and media downloads require the live bridge. The default endpoint is localhost-only at `http://127.0.0.1:8741/api`.
 - Contact search can optionally merge known WhatsApp direct chats with read-only Contacts.app results on macOS. Enable it with `python3 scripts/install_macos_launch_agent.py --with-contacts`. Contacts without a known chat are marked `has_whatsapp_chat: false`; the server does not assume that every address-book number has WhatsApp.
+- Contact-search tools require a non-empty name or phone-number fragment; blank queries return no contacts.
 - Contacts.app access is opt-in. On first use, macOS asks whether **WhatsApp MCP Contacts** may access your contacts. If the helper is absent or permission is denied, `contacts_app_status` reports that state and WhatsApp-only contact and chat search continues to work.
 - Text, file, and audio sends use a two-stage flow. The first tool call returns a preview and a short-lived one-time token without sending. A second matching call is required after explicit user confirmation.
 - Persistent service logs run at WARN level and omit message bodies by default. Interactive debugging can opt in with `--log-messages`, but this writes private content to the console or configured log.
