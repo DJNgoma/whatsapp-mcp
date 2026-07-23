@@ -28,17 +28,17 @@ jobs:
         working-directory: whatsapp-bridge
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: whatsapp-bridge/go.mod
           cache-dependency-path: whatsapp-bridge/go.sum
 
       - name: Set up MinGW for CGO
         if: runner.os == 'Windows'
-        uses: egor-tensin/setup-mingw@v2
+        uses: egor-tensin/setup-mingw@41b837e47d7f85214629d255b9c4bc3fcbe9fd63 # v3
         with:
           platform: x64
 
@@ -63,15 +63,15 @@ jobs:
         working-directory: whatsapp-mcp-server
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
           cache-dependency-glob: whatsapp-mcp-server/uv.lock
@@ -98,7 +98,7 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Compile native helper
         run: >-

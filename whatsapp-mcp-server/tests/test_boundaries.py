@@ -1,7 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest import mock
@@ -255,7 +255,7 @@ class ContactSearchTests(unittest.TestCase):
     def test_macos_contacts_are_merged_with_known_whatsapp_chats(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             database_path = Path(temporary_directory) / "messages.db"
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection:
                 connection.execute(
                     "CREATE TABLE chats (jid TEXT PRIMARY KEY, name TEXT, last_message_time TIMESTAMP)"
                 )
@@ -263,6 +263,7 @@ class ContactSearchTests(unittest.TestCase):
                     "INSERT INTO chats VALUES (?, ?, ?)",
                     ("27820000000@s.whatsapp.net", None, None),
                 )
+                connection.commit()
 
             contacts = [
                 {"name": "Known Person", "phone_number": "+27 82 000 0000"},

@@ -34,6 +34,11 @@ class ProfileInstanceTests(unittest.TestCase):
             verifier.subprocess,
             "run",
         ) as launchctl, mock.patch.object(
+            verifier.os,
+            "getuid",
+            create=True,
+            return_value=501,
+        ), mock.patch.object(
             verifier,
             "fetch_json",
             return_value={"instance_id": "another-instance"},
