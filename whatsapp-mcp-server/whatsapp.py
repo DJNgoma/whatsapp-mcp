@@ -192,7 +192,7 @@ def format_message(message: Message, show_chat_info: bool = True) -> None:
     else:
         output += f"[{message.timestamp:%Y-%m-%d %H:%M:%S}] "
         
-    content_prefix = ""
+    content_prefix = f"[Message ID: {message.id} - Chat JID: {message.chat_jid}] "
     if hasattr(message, 'media_type') and message.media_type:
         content_prefix = f"[{message.media_type} - Message ID: {message.id} - Chat JID: {message.chat_jid}] "
     
