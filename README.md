@@ -358,3 +358,29 @@ After installing the `whisper` extra, use `transcribe_audio_message` with the sa
 - **WhatsApp out of sync**: Stop the bridge, unlink the affected linked device in WhatsApp, and move that profile's `whatsapp.db` aside before pairing again with the same store. Preserve `messages.db`; it contains local message history. Never repair one account using another account's store.
 
 For client integration help, see the [Codex MCP documentation](https://developers.openai.com/codex/mcp), the [MCP guide for connecting local servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers) (including Claude Desktop), or the [Cursor MCP documentation](https://docs.cursor.com/context/model-context-protocol). These client instructions apply across macOS, Linux, and Windows where the respective client is available; bridge-specific platform commands remain in the [platform setup guide](docs/platform-setup.md).
+
+### Quoted replies
+
+Use `reply_message(chat_jid, message_id, message)` to prepare a text reply to a
+specific message. `list_messages` now includes both identifiers on text as well
+as media results. Copy the exact stored chat JID (including `@lid` where present).
+The preview includes the original sender, quoted text/media type, and reply text;
+a second call with identical arguments and its one-time `confirmation_token`
+sends only after user approval. A changed quote, chat, or reply invalidates the
+confirmation. There is no fallback to an ordinary message.
+
+The bridge exposes read-only `GET /api/reply/preview?chat_jid=...&message_id=...`
+and `POST /api/reply` with `chat_jid`, `message_id`, `message`, and the preview's
+`fingerprint`. As with `/api/send`, the loopback REST API is a trusted local
+interface; user confirmation is enforced by the MCP layer. The send endpoint
+rechecks the fingerprint before sending. Successful responses include both the
+new `message_id` and `reply_to_message_id`; storage warnings do not turn an
+already accepted provider send into a retryable failure.
+
+Text, image, video, document, audio, and sticker targets captured after this
+upgrade retain shallow quote payloads in the private `message_quotes` table.
+History sync also captures payloads when the sender namespace is known. Older
+text can be quoted when the sender can be resolved reliably; older media without
+its original payload and ambiguous group senders are rejected. This tool sends
+text replies; sending new media as a reply is not currently exposed. Ordinary
+send tools retain their existing behavior.

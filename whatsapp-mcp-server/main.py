@@ -4,6 +4,7 @@ from mcp.server.fastmcp import FastMCP
 from macos_contacts import contacts_app_status as macos_contacts_app_status
 from outbound_confirmation import consume as consume_confirmation
 from outbound_confirmation import prepare as prepare_confirmation
+from replies import reply_message
 from transcription import transcribe_audio_file as whisper_transcribe_audio_file
 from transcription import whisper_status as get_whisper_status
 from whatsapp import (
@@ -36,6 +37,8 @@ from whatsapp import (
 
 # Initialize FastMCP server
 mcp = FastMCP("whatsapp")
+
+mcp.tool()(reply_message)
 
 MAX_PAGE_SIZE = 100
 MAX_PAGE_NUMBER = 1_000

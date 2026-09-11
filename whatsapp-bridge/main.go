@@ -148,6 +148,12 @@ func NewMessageStore(storeDir string) (*MessageStore, error) {
 			FOREIGN KEY (chat_jid) REFERENCES chats(jid)
 		);
 
+		CREATE TABLE IF NOT EXISTS message_quotes (
+			id TEXT, chat_jid TEXT, sender_jid TEXT NOT NULL, payload BLOB NOT NULL,
+			reply_to_message_id TEXT NOT NULL DEFAULT '', reply_to_sender_jid TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (id,chat_jid)
+		);
+
 		CREATE INDEX IF NOT EXISTS idx_messages_chat_timestamp
 			ON messages (chat_jid, timestamp DESC);
 		CREATE INDEX IF NOT EXISTS idx_messages_timestamp
@@ -762,6 +768,9 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, eventBr
 	if err != nil {
 		logger.Warnf("Failed to store message: %v", err)
 	} else {
+		if quoteErr := messageStore.storeQuote(msg.Info.ID, chatJID, msg.Info.Sender.ToNonAD().String(), msg.Message); quoteErr != nil {
+			logger.Debugf("Quote payload unavailable: %v", quoteErr)
+		}
 		eventBroker.publish(bridgeEvent{
 			Type: "message", ID: msg.Info.ID, ChatJID: chatJID, ChatName: name, Sender: sender,
 			PhoneNumber: eventPhoneNumber(client, msg.Info.Chat),
@@ -1126,6 +1135,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, event
 	mux := http.NewServeMux()
 	registerCapabilityHandlers(mux, client, messageStore)
 	registerEventStreamHandler(mux, eventBroker)
+	registerReplyHandlers(mux, client, messageStore, eventBroker)
 
 	// Health is read-only and reports both live connectivity and local cache age.
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -1994,6 +2004,15 @@ func handleHistorySync(client *whatsmeow.Client, messageStore *MessageStore, his
 				if err != nil {
 					logger.Warnf("Failed to store history message: %v", err)
 				} else {
+					quoteSender := sender
+					if isFromMe {
+						quoteSender = client.Store.ID.ToNonAD().String()
+					} else if !strings.Contains(sender, "@") && jid.Server != types.GroupServer {
+						quoteSender = jid.ToNonAD().String()
+					}
+					if strings.Contains(quoteSender, "@") {
+						_ = messageStore.storeQuote(msgID, chatJID, quoteSender, msg.Message.Message)
+					}
 					syncedCount++
 					if logMessages {
 						if mediaType != "" {
