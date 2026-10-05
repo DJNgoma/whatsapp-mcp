@@ -94,6 +94,10 @@ class LaunchAgentTests(unittest.TestCase):
             self.assertEqual(permissions(log_dir), 0o700)
             self.assertEqual(permissions(log_file), 0o600)
             self.assertEqual(permissions(plist_path), 0o600)
+            self.assertEqual(configuration["ProcessType"], "Standard")
+            self.assertTrue(configuration["RunAtLoad"])
+            self.assertTrue(configuration["KeepAlive"])
+            self.assertEqual(configuration["EnvironmentVariables"]["GOMAXPROCS"], "1")
             self.assertEqual(
                 configuration["EnvironmentVariables"]["WHATSAPP_BRIDGE_INSTANCE_ID"],
                 installer.profile_label("company"),
