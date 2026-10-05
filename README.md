@@ -346,6 +346,36 @@ After installing the `whisper` extra, use `transcribe_audio_message` with the sa
 
 - If you encounter permission issues when running `uv`, add it to `PATH` or use its absolute path. Use `command -v uv` on macOS/Linux or `Get-Command uv` in Windows PowerShell.
 - Use `bridge_status` or the `/api/health` endpoint to distinguish a stopped bridge from a stale local database.
+
+### Message-ingestion reliability
+
+Transport connectivity is not proof that the local message cache contains all
+messages from the phone. Health reports `connected_unverified` when connected,
+with `reads_may_be_stale: true` and separate ingestion evidence: inbound event
+count/time, successful storage time, storage failure count, undecryptable event
+count and offline-sync completion. Never infer “no reply” from an empty local
+query alone. Offline-sync completion is server-stream evidence, not proof of
+complete historical phone coverage. Storage failures remain visible for the
+process lifetime, even if a later write succeeds.
+
+Repeated keepalive failures trigger an asynchronous transport reconnect, limited
+to once per five minutes. A quiet account alone does not trigger a reconnect.
+SQLite uses WAL and a five-second busy timeout to reduce transient reader/writer
+contention. Pairing and historical data are retained. Before replacing bridge
+binaries, take SQLite online backups of both `messages.db` and `whatsapp.db`,
+and retain the old executable for rollback. Verify account identity and a real
+incoming message after deployment; health and unit tests alone are insufficient.
+
+The macOS LaunchAgent uses `ProcessType=Standard`, not discretionary Background
+QoS, which was observed stalling Go startup and delivery on this host. Retain
+`RunAtLoad` and `KeepAlive`. Reload the LaunchAgent after an executable replacement
+so macOS refreshes its executable requirement. For inspection, `plutil -extract`
+must include `-o -`: omitting it overwrites the input plist with the extracted
+value. Use `plutil -lint` before bootstrap. Reconnect existing MCP sessions after
+Python changes; a running session retains its imported old freshness helper.
+
+WhatsApp's on-demand history request retrieves messages **before** its anchor.
+It must not be presented as recovery of newer messages missing after an outage.
 - For service logs and startup checks on macOS, Linux, and Windows, use the matching section in the [platform setup guide](docs/platform-setup.md).
 
 ### Authentication issues

@@ -104,9 +104,16 @@ def get_bridge_status() -> dict:
     except (requests.RequestException, json.JSONDecodeError) as error:
         result["bridge_error"] = str(error)
 
-    result["reads_may_be_stale"] = not (
-        result.get("bridge_reachable") and result.get("connected") and result.get("logged_in")
+    # Transport liveness is not evidence that phone history was ingested.
+    # Legacy bridges have no coverage signal and must not default to fresh.
+    result["reads_may_be_stale"] = (
+        result.get("reads_may_be_stale", True)
+        or not result.get("bridge_reachable")
+        or not result.get("connected")
+        or not result.get("logged_in")
+        or bool(result.get("database_error"))
     )
+    result.setdefault("coverage", "unverified: bridge provides no history coverage proof")
     return result
 
 

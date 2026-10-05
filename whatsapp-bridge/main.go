@@ -73,8 +73,9 @@ type Message struct {
 
 // Database handler for storing message history
 type MessageStore struct {
-	db       *sql.DB
-	storeDir string
+	db        *sql.DB
+	storeDir  string
+	ingestion ingestionHealth
 }
 
 func ensurePrivateDirectory(directory string) error {
@@ -102,6 +103,39 @@ func secureStorePermissions(root string) error {
 	})
 }
 
+// secureRuntimeStorePermissions secures the small set of private state files
+// that the bridge needs to open at startup. A full recursive permissions
+// migration is intentionally kept separate: downloaded media is created in
+// private directories with mode 0600, while walking a large or slow store on
+// every LaunchAgent restart can prevent the local API from ever binding.
+func secureRuntimeStorePermissions(root string) error {
+	if err := ensurePrivateDirectory(root); err != nil {
+		return err
+	}
+
+	for _, name := range []string{
+		"whatsapp.db", "whatsapp.db-wal", "whatsapp.db-shm",
+		"messages.db", "messages.db-wal", "messages.db-shm",
+	} {
+		path := filepath.Join(root, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("failed to inspect private store file %s: %w", path, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("private store file %s is not a regular file", path)
+		}
+		if err := os.Chmod(path, 0600); err != nil {
+			return fmt.Errorf("failed to secure private store file %s: %w", path, err)
+		}
+	}
+
+	return nil
+}
+
 // Initialize message store
 func NewMessageStore(storeDir string) (*MessageStore, error) {
 	// Create directory for database if it doesn't exist
@@ -110,7 +144,7 @@ func NewMessageStore(storeDir string) (*MessageStore, error) {
 	}
 
 	// Open SQLite database for messages
-	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", filepath.Join(storeDir, "messages.db")))
+	db, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL", filepath.Join(storeDir, "messages.db")))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open message database: %v", err)
 	}
@@ -188,7 +222,7 @@ func NewMessageStore(storeDir string) (*MessageStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("failed to backfill outbound message status: %v", err)
 	}
-	if err := secureStorePermissions(storeDir); err != nil {
+	if err := secureRuntimeStorePermissions(storeDir); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to secure store permissions: %v", err)
 	}
@@ -207,7 +241,9 @@ func (store *MessageStore) StoreChat(jid, name string, lastMessageTime time.Time
 		`INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
 		 ON CONFLICT(jid) DO UPDATE SET
 		 name = CASE WHEN excluded.name != '' THEN excluded.name ELSE chats.name END,
-		 last_message_time = excluded.last_message_time`,
+		 last_message_time = CASE
+		 WHEN chats.last_message_time IS NULL OR julianday(excluded.last_message_time) > julianday(chats.last_message_time)
+		 THEN excluded.last_message_time ELSE chats.last_message_time END`,
 		jid, name, lastMessageTime,
 	)
 	return err
@@ -249,6 +285,7 @@ func (store *MessageStore) StoreMessage(id, chatJID, sender, content string, tim
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, chatJID, sender, content, timestamp, isFromMe, mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength, map[bool]string{true: "sent", false: ""}[isFromMe],
 	)
+	store.ingestion.recordWrite(err)
 	return err
 }
 
@@ -412,11 +449,12 @@ func eventPhoneNumber(client *whatsmeow.Client, jid types.JID) string {
 	if jid.Server == types.DefaultUserServer {
 		return jid.User
 	}
-	if jid.Server == types.HiddenUserServer {
-		if phoneJID, err := client.Store.LIDs.GetPNForLID(context.Background(), jid); err == nil {
-			return phoneJID.User
-		}
-	}
+	// This is called while whatsmeow delivers an inbound event. Resolving a
+	// LID through the store can block on its backing SQLite cache while a sync
+	// is active, which in turn starves node handling and WhatsApp keepalives.
+	// The phone number is optional event metadata, so preserve a stable empty
+	// value for LID chats rather than performing a live lookup here.
+	_ = client
 	return ""
 }
 
@@ -485,12 +523,17 @@ func newDocumentMessage(mediaPath, caption, mimeType string, upload whatsmeow.Up
 }
 
 type HealthResponse struct {
-	Status                  string `json:"status"`
-	Connected               bool   `json:"connected"`
-	LoggedIn                bool   `json:"logged_in"`
-	LatestStoredMessageTime string `json:"latest_stored_message_time,omitempty"`
-	ServerTime              string `json:"server_time"`
-	InstanceID              string `json:"instance_id,omitempty"`
+	Status                  string                 `json:"status"`
+	Connected               bool                   `json:"connected"`
+	LoggedIn                bool                   `json:"logged_in"`
+	LatestStoredMessageTime string                 `json:"latest_stored_message_time,omitempty"`
+	ServerTime              string                 `json:"server_time"`
+	InstanceID              string                 `json:"instance_id,omitempty"`
+	Ingestion               map[string]interface{} `json:"ingestion"`
+	ReadsMayBeStale         bool                   `json:"reads_may_be_stale"`
+	Coverage                string                 `json:"coverage"`
+	DatabaseError           string                 `json:"database_error,omitempty"`
+	BuildVersion            string                 `json:"build_version"`
 }
 
 func configuredBridgeInstanceID() string {
@@ -1145,11 +1188,16 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, event
 		}
 
 		var latestMessage sql.NullString
-		_ = messageStore.db.QueryRow("SELECT MAX(timestamp) FROM messages").Scan(&latestMessage)
+		dbErr := messageStore.db.QueryRow("SELECT MAX(timestamp) FROM messages").Scan(&latestMessage)
+		ingestion := messageStore.ingestion.snapshot()
 
 		status := "degraded"
-		if client.IsConnected() && client.IsLoggedIn() {
-			status = "ok"
+		if client.IsConnected() && client.IsLoggedIn() && dbErr == nil && ingestion["storage_failures"].(uint64) == 0 && !ingestion["keepalive_failed"].(bool) {
+			status = "connected_unverified"
+		}
+		databaseError := ""
+		if dbErr != nil {
+			databaseError = dbErr.Error()
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -1160,6 +1208,9 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, event
 			LatestStoredMessageTime: latestMessage.String,
 			ServerTime:              time.Now().Format(time.RFC3339),
 			InstanceID:              configuredBridgeInstanceID(),
+			Ingestion:               ingestion, ReadsMayBeStale: true,
+			Coverage:      "unverified: connection and offline-sync completion do not prove all phone history is cached",
+			DatabaseError: databaseError, BuildVersion: "ingestion-health-2026-10-05",
 		})
 	})
 
@@ -1552,6 +1603,12 @@ func main() {
 		return
 	}
 	client.QRClientType = pairing.clientType
+	// Keep the local API available through a transient websocket outage. For
+	// an existing linked device, whatsmeow can reconnect in the background
+	// instead of ending the bridge process after its first retryable failure.
+	if client.Store.ID != nil {
+		client.InitialAutoReconnect = true
+	}
 
 	// Initialize message store
 	messageStore, err := NewMessageStore(*storeDir)
@@ -1565,13 +1622,33 @@ func main() {
 	// Setup event handling for messages and history sync
 	client.AddEventHandler(func(evt interface{}) {
 		switch v := evt.(type) {
+		case *events.OfflineSyncCompleted:
+			messageStore.ingestion.offlineSyncCompleted()
+		case *events.Disconnected:
+			messageStore.ingestion.disconnected()
+		case *events.KeepAliveRestored:
+			messageStore.ingestion.keepaliveRestored()
+		case *events.KeepAliveTimeout:
+			if messageStore.ingestion.shouldReconnect(v.ErrorCount, time.Now()) {
+				// Never reconnect synchronously inside the websocket event handler.
+				go func() {
+					logger.Warnf("Repeated keepalive failures: reconnecting transport without changing pairing")
+					client.Disconnect()
+					if err := client.Connect(); err != nil {
+						logger.Warnf("Keepalive recovery connect failed: %v", err)
+					}
+				}()
+			}
 		case *events.Message:
+			messageStore.ingestion.received(false)
 			// Process regular messages
 			handleMessage(client, messageStore, eventBroker, v, logger, *logMessages)
 
 		case *events.HistorySync:
 			// Process history sync events
 			handleHistorySync(client, messageStore, v, logger, *logMessages)
+		case *events.UndecryptableMessage:
+			messageStore.ingestion.received(true)
 
 		case *events.CallOffer:
 			chatJID := v.From.String()
@@ -1623,12 +1700,22 @@ func main() {
 			}
 
 		case *events.Connected:
+			messageStore.ingestion.connected()
 			logger.Infof("Connected to WhatsApp")
 
 		case *events.LoggedOut:
 			logger.Warnf("Device logged out, please pair the device again")
 		}
 	})
+
+	// Start the loopback API before the initial WhatsApp connection attempt.
+	// It can then report a disconnected state instead of disappearing while
+	// whatsmeow retries, and all outbound sends remain guarded by IsConnected.
+	server, err := startRESTServer(client, messageStore, eventBroker, *port)
+	if err != nil {
+		logger.Errorf("Failed to start REST API server: %v", err)
+		return
+	}
 
 	// Connect to WhatsApp
 	if client.Store.ID == nil {
@@ -1734,19 +1821,10 @@ func main() {
 	// Wait a moment for connection to stabilize
 	time.Sleep(2 * time.Second)
 
-	if !client.IsConnected() {
-		logger.Errorf("Failed to establish stable connection")
-		return
-	}
-
-	fmt.Println("\n✓ Connected to WhatsApp.")
-
-	// Start REST API server
-	server, err := startRESTServer(client, messageStore, eventBroker, *port)
-	if err != nil {
-		logger.Errorf("Failed to start REST API server: %v", err)
-		client.Disconnect()
-		return
+	if client.IsConnected() {
+		fmt.Println("\n✓ Connected to WhatsApp.")
+	} else {
+		logger.Warnf("REST API is running while WhatsApp reconnects; outbound sends remain disabled")
 	}
 
 	// Create a channel to keep the main goroutine alive
@@ -1817,35 +1895,28 @@ func GetChatName(client *whatsmeow.Client, messageStore *MessageStore, jid types
 			}
 		}
 
-		// If we didn't get a name, try group info
+		// Do not perform a live group-info request here. This function runs on
+		// whatsmeow's inbound event path, where a stalled websocket request can
+		// block node handling long enough to miss keepalives and disconnect the
+		// bridge. History-sync data and existing chat records already provide a
+		// name in the normal case; otherwise retain a stable local fallback.
 		if name == "" {
-			groupInfo, err := client.GetGroupInfo(context.Background(), jid)
-			if err == nil && groupInfo.Name != "" {
-				name = groupInfo.Name
-			} else {
-				// Fallback name for groups
-				name = fmt.Sprintf("Group %s", jid.User)
-			}
+			name = fmt.Sprintf("Group %s", jid.User)
 		}
 
 		logger.Infof("Using group name: %s", name)
 	} else {
-		// This is an individual contact
-		logger.Infof("Getting name for contact: %s", chatJID)
-
-		// Just use contact info (full name)
-		contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
-		if err == nil && contact.FullName != "" {
-			name = contact.FullName
-		} else if sender != "" {
-			// Fallback to sender
+		// Do not resolve contacts through the whatsmeow store on the inbound
+		// event path either. Its cache lock and backing SQLite query can stall
+		// while a sync is active, which is just as harmful to keepalives as a
+		// remote group lookup. Existing chat names are returned above; new
+		// direct chats get a stable sender/JID fallback until a deliberate
+		// contact-resolution request refreshes them.
+		if sender != "" {
 			name = sender
 		} else {
-			// Last fallback to JID
 			name = jid.User
 		}
-
-		logger.Infof("Using contact name: %s", name)
 	}
 
 	return name

@@ -201,10 +201,13 @@ def write_launch_agent(
             "WHATSAPP_BRIDGE_PORT": str(port),
             "WHATSAPP_BRIDGE_INSTANCE_ID": label,
             "WHATSAPP_STORE_DIR": str(store_dir),
+            "GOMAXPROCS": "1",
         },
         "RunAtLoad": True,
         "KeepAlive": True,
-        "ProcessType": "Background",
+        # A websocket receiver must not be scheduled as discretionary work.
+        # Background QoS was observed stalling Go startup and offline delivery.
+        "ProcessType": "Standard",
         "ThrottleInterval": 5,
         "StandardOutPath": str(log_dir / "bridge.log"),
         "StandardErrorPath": str(log_dir / "bridge.error.log"),
