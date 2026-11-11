@@ -405,11 +405,11 @@ func registerCapabilityHandlers(mux *http.ServeMux, client *whatsmeow.Client, me
 		}
 		chatJIDs := []string{chatJID}
 		if jid, err := types.ParseJID(chatJID); err == nil {
-			if jid.Server == types.HiddenUserServer {
+			if jid.Server == types.HiddenUserServer && client.Store.LIDs != nil {
 				if phoneJID, mapErr := client.Store.LIDs.GetPNForLID(r.Context(), jid); mapErr == nil {
 					chatJIDs = append(chatJIDs, phoneJID.String())
 				}
-			} else if jid.Server == types.DefaultUserServer {
+			} else if jid.Server == types.DefaultUserServer && client.Store.LIDs != nil {
 				if lidJID, mapErr := client.Store.LIDs.GetLIDForPN(r.Context(), jid); mapErr == nil {
 					chatJIDs = append(chatJIDs, lidJID.String())
 				}
@@ -436,6 +436,20 @@ func registerCapabilityHandlers(mux *http.ServeMux, client *whatsmeow.Client, me
 			if err = rows.Scan(&item.ID, &item.ChatJID, &item.Sender, &item.Content, &item.Timestamp, &item.IsFromMe, &item.MediaType, &item.Filename, &item.Status); err != nil {
 				writeCapabilityError(w, http.StatusInternalServerError, fmt.Errorf("failed to read message: %w", err))
 				return
+			}
+			// The receipt ledger is authoritative; historical status labels may
+			// predate verification or have been overwritten by history sync.
+			item.Status = ""
+			if item.IsFromMe {
+				jid, parseErr := deliveryJID(item.ChatJID)
+				if parseErr == nil {
+					status, statusErr := messageStore.deliveryStatus(r.Context(), jid, item.ID, chatJIDs)
+					if statusErr != nil {
+						writeCapabilityError(w, 503, fmt.Errorf("delivery evidence unavailable"))
+						return
+					}
+					item.Status = status.DeliveryStatus
+				}
 			}
 			messages = append(messages, item)
 		}

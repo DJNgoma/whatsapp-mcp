@@ -239,6 +239,7 @@ func registerReplyRoutes(mux *http.ServeMux, client *whatsmeow.Client, s *Messag
 			fail(w, 502, err)
 			return
 		}
+		_ = s.RecordOutboundAcceptance(t.ChatJID, id)
 		now := time.Now()
 		sender := client.Store.ID.ToNonAD().String()
 		// A successful provider send must never be reported as a failure merely

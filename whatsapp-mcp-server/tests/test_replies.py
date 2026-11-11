@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 import outbound_confirmation
 import replies
+import delivery
 
 TARGET = {"chat_jid": "99900001@s.whatsapp.net", "message_id": "original",
           "sender_jid": "99900002@lid", "text": "Birthday speech", "fingerprint": "hash"}
@@ -15,6 +16,9 @@ class ReplyTests(unittest.TestCase):
         self.mock = patch.object(replies, "_bridge_api_request", side_effect=self.bridge)
         self.mock.start()
         self.addCleanup(self.mock.stop)
+        receipt_mock = patch.object(delivery, "_bridge_api_request", return_value={"success": False, "message": "no fixture receipt"})
+        receipt_mock.start()
+        self.addCleanup(receipt_mock.stop)
 
     def bridge(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))

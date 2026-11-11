@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from outbound_confirmation import consume, prepare
 from whatsapp import _bridge_api_request
+from delivery import finish_send
 
 
 def reply_message(chat_jid: str, message_id: str, message: str,
@@ -40,5 +41,5 @@ def reply_message(chat_jid: str, message_id: str, message: str,
         "chat_jid": target["chat_jid"], "message_id": target["message_id"],
         "message": message, "fingerprint": target["fingerprint"],
     })
-    result["requires_confirmation"] = False
-    return result
+    verified = finish_send(target["chat_jid"], (bool(result.get("success")), result.get("message", "Reply accepted"), result.get("message_id")))
+    return {**result, **verified}
