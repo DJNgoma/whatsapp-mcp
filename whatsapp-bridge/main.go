@@ -222,6 +222,10 @@ func NewMessageStore(storeDir string) (*MessageStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("failed to backfill outbound message status: %v", err)
 	}
+	if err := (&MessageStore{db: db}).initDeliveryStore(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to initialize delivery ledger: %w", err)
+	}
 	if err := secureRuntimeStorePermissions(storeDir); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to secure store permissions: %v", err)
@@ -460,9 +464,11 @@ func eventPhoneNumber(client *whatsmeow.Client, jid types.JID) string {
 
 // SendMessageResponse represents the response for the send message API
 type SendMessageResponse struct {
-	Success   bool   `json:"success"`
-	Message   string `json:"message"`
-	MessageID string `json:"message_id,omitempty"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message"`
+	MessageID         string `json:"message_id,omitempty"`
+	ChatJID           string `json:"chat_jid,omitempty"`
+	DeliveryConfirmed bool   `json:"delivery_confirmed"`
 }
 
 // SendMessageRequest represents the request body for the send message API
@@ -1176,6 +1182,7 @@ func extractDirectPathFromURL(url string) string {
 // Start a REST API server to expose the WhatsApp client functionality
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, eventBroker *eventBroker, port int) (*http.Server, error) {
 	mux := http.NewServeMux()
+	registerDeliveryRoutes(mux, client, messageStore)
 	registerCapabilityHandlers(mux, client, messageStore)
 	registerEventStreamHandler(mux, eventBroker)
 	registerReplyHandlers(mux, client, messageStore, eventBroker)
@@ -1245,10 +1252,12 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, event
 		// Send the message
 		success, message, messageID := sendWhatsAppMessage(client, req.Recipient, req.Message, req.MediaPath)
 		if success && messageID != "" {
-			chatJID := req.Recipient
-			if parsed, parseErr := types.ParseJID(req.Recipient); parseErr == nil {
-				chatJID = parsed.String()
+			parsed, _ := deliveryJID(req.Recipient)
+			chatJID := parsed.String()
+			if err := messageStore.RecordOutboundAcceptance(chatJID, messageID); err != nil {
+				message += "; accepted, but delivery tracking unavailable; do not resend"
 			}
+
 			sender := ""
 			if client.Store.ID != nil {
 				sender = client.Store.ID.User
@@ -1276,6 +1285,7 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, event
 			Success:   success,
 			Message:   message,
 			MessageID: messageID,
+			ChatJID:   func() string { jid, _ := deliveryJID(req.Recipient); return jid.String() }(),
 		})
 	})
 
@@ -1682,21 +1692,8 @@ func main() {
 			}
 
 		case *events.Receipt:
-			status := "delivered"
-			switch v.Type {
-			case types.ReceiptTypeRead, types.ReceiptTypeReadSelf:
-				status = "read"
-			case types.ReceiptTypeRetry:
-				status = "failed"
-			case types.ReceiptTypeSender:
-				status = "sent"
-			}
-			for _, messageID := range v.MessageIDs {
-				if err := messageStore.SetMessageStatus(v.Chat.String(), messageID, status); err != nil {
-					logger.Warnf("Failed to store receipt status for %s: %v", messageID, err)
-				} else {
-					eventBroker.publish(bridgeEvent{Type: "receipt", ChatJID: v.Chat.String(), Status: status, MessageIDs: []string{messageID}})
-				}
+			if err := messageStore.handleDeliveryReceipt(eventBroker, v); err != nil {
+				logger.Warnf("Failed to persist delivery receipt: %v", err)
 			}
 
 		case *events.Connected:

@@ -290,6 +290,7 @@ The connected MCP client can access these WhatsApp tools:
 - **get_last_interaction**: Get the most recent message with a contact
 - **get_message_context**: Retrieve context around a specific message
 - **send_message**: Prepare and explicitly confirm a WhatsApp message to a phone number or group JID
+- **get_message_delivery_status**: Read-only check of the exact chat/message ID; optionally wait up to 30 seconds for recipient delivery/read evidence.
 - **send_file**: Prepare and explicitly confirm a file send (image, video, raw audio, document)
 - **send_audio_message**: Prepare and explicitly confirm an audio send (requires an `.ogg` Opus file or FFmpeg)
 - **download_media**: Download media from a WhatsApp message and get the local file path
@@ -414,3 +415,16 @@ text can be quoted when the sender can be resolved reliably; older media without
 its original payload and ambiguous group senders are rejected. This tool sends
 text replies; sending new media as a reply is not currently exposed. Ordinary
 send tools retain their existing behavior.
+
+### Confirming delivery
+
+Confirmed text, file, audio and quoted-reply sends return the accepted message ID
+and wait up to 15 seconds for a recipient receipt. `success: true` means WhatsApp
+accepted the send; only `delivery_confirmed: true` proves recipient delivery.
+`delivery_status` is `pending` until a delivery/read receipt is recorded. Offline
+recipients may stay pending; never resend automatically because a receipt is late.
+Use `get_message_delivery_status(chat_jid, message_id, wait_seconds=30)` to check
+later without sending anything. Own-device and protocol receipts do not count;
+a group member receipt is `partial_delivery`, not delivery to the whole group.
+Historical status labels are not upgraded into receipt evidence. The REST
+`GET /api/message-status` endpoint exposes the same bounded read-only check.

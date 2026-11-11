@@ -5,6 +5,7 @@ from macos_contacts import contacts_app_status as macos_contacts_app_status
 from outbound_confirmation import consume as consume_confirmation
 from outbound_confirmation import prepare as prepare_confirmation
 from replies import reply_message
+from delivery import finish_send, get_message_delivery_status
 from transcription import transcribe_audio_file as whisper_transcribe_audio_file
 from transcription import whisper_status as get_whisper_status
 from whatsapp import (
@@ -39,6 +40,7 @@ from whatsapp import (
 mcp = FastMCP("whatsapp")
 
 mcp.tool()(reply_message)
+mcp.tool()(get_message_delivery_status)
 
 MAX_PAGE_SIZE = 100
 MAX_PAGE_NUMBER = 1_000
@@ -486,7 +488,8 @@ def send_message(
         confirmation_token: One-time token from the preview stage
     
     Returns:
-        A dictionary containing success status and a status message
+        Server acceptance plus independently verified recipient delivery status.
+        Pending delivery is not a failed send; never resend automatically.
     """
     # Validate input
     if not recipient:
@@ -506,12 +509,7 @@ def send_message(
     if not confirmed:
         return {"success": False, "message": confirmation_message}
 
-    success, status_message = whatsapp_send_message(recipient, message)
-    return {
-        "success": success,
-        "requires_confirmation": False,
-        "message": status_message,
-    }
+    return finish_send(recipient, whatsapp_send_message(recipient, message))
 
 @mcp.tool()
 def send_file(
@@ -531,7 +529,8 @@ def send_file(
         confirmation_token: One-time token from the preview stage
     
     Returns:
-        A dictionary containing success status and a status message
+        Server acceptance plus independently verified recipient delivery status.
+        Pending delivery is not a failed send; never resend automatically.
     """
     if not recipient or not media_path:
         return {"success": False, "message": "Recipient and media path are required"}
@@ -544,12 +543,7 @@ def send_file(
     if not confirmed:
         return {"success": False, "message": confirmation_message}
 
-    success, status_message = whatsapp_send_file(recipient, media_path)
-    return {
-        "success": success,
-        "requires_confirmation": False,
-        "message": status_message,
-    }
+    return finish_send(recipient, whatsapp_send_file(recipient, media_path))
 
 @mcp.tool()
 def send_audio_message(
@@ -569,7 +563,8 @@ def send_audio_message(
         confirmation_token: One-time token from the preview stage
     
     Returns:
-        A dictionary containing success status and a status message
+        Server acceptance plus independently verified recipient delivery status.
+        Pending delivery is not a failed send; never resend automatically.
     """
     if not recipient or not media_path:
         return {"success": False, "message": "Recipient and media path are required"}
@@ -582,12 +577,7 @@ def send_audio_message(
     if not confirmed:
         return {"success": False, "message": confirmation_message}
 
-    success, status_message = whatsapp_audio_voice_message(recipient, media_path)
-    return {
-        "success": success,
-        "requires_confirmation": False,
-        "message": status_message,
-    }
+    return finish_send(recipient, whatsapp_audio_voice_message(recipient, media_path))
 
 @mcp.tool()
 def download_media(message_id: str, chat_jid: str) -> Dict[str, Any]:
