@@ -710,12 +710,16 @@ func registerCapabilityHandlers(mux *http.ServeMux, client *whatsmeow.Client, me
 		if request.Blocked {
 			action = events.BlocklistChangeActionBlock
 		}
-		blocklist, err := client.UpdateBlocklist(r.Context(), jid, action)
+		blocklist, err := client.UpdateBlocklist(r.Context(), jid, action, "")
 		if err != nil {
 			writeCapabilityError(w, http.StatusBadGateway, fmt.Errorf("failed to update block state: %w", err))
 			return
 		}
-		writeCapabilityJSON(w, http.StatusOK, capabilityResponse{Success: true, Data: map[string]any{"blocked_count": len(blocklist.JIDs)}, Message: "Contact block state updated"})
+		if blocklist == nil {
+			writeCapabilityError(w, http.StatusBadGateway, fmt.Errorf("updated block list was not returned"))
+			return
+		}
+		writeCapabilityJSON(w, http.StatusOK, capabilityResponse{Success: true, Data: map[string]any{"blocked_count": len(blocklist.Items)}, Message: "Contact block state updated"})
 	})
 
 	mux.HandleFunc("/api/chat/presence", func(w http.ResponseWriter, r *http.Request) {

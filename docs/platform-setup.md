@@ -30,6 +30,32 @@ Every process should have a distinct instance ID. `/api/health` returns the ID
 from `WHATSAPP_BRIDGE_INSTANCE_ID`, and startup checks should require the
 expected value as well as `connected: true` and `logged_in: true`.
 
+### Recovering from an outdated WhatsApp Web client
+
+If the local health endpoint responds but the bridge stays disconnected and the
+bridge log reports `Client outdated (405) connect failure`, restarting the same
+binary or re-pairing the phone will not update its WhatsApp Web client. That
+version is bundled with the bridge's pinned `whatsmeow` dependency.
+
+1. Check the repository's Go requirement and the deployed build with
+   `go version -m /path/to/whatsapp-mcp-bridge`. From `whatsapp-bridge`, run
+   `go test ./...` and build the updated revision to a separate path with
+   `go build -o /path/to/staged-bridge .`.
+2. Keep the existing binary and take a protected backup of the target store
+   using your normal backup procedure before applying an update that migrates
+   its database. Replace the binary and restart only the affected service.
+   Keep its existing instance ID, port, and store path. Do not delete its
+   databases, unlink the device, or restart a separate account as part of this fix.
+3. Read the target service's `/api/health` and verify the connected identity.
+   Check for both live login and recent message ingestion. A connected bridge
+   can still be catching up; keep the last complete checkpoint until coverage
+   has been checked. Do not send a message just to test connectivity.
+
+If startup fails, inspect the bridge error log first. Restore the previous binary
+only if it supports the current store schema; otherwise use the protected
+pre-update backup under your normal recovery procedure. A rollback to a rejected
+client version restores the old build, not connectivity.
+
 Resource defaults keep local AI reads and transcription finite: MCP page sizes
 are capped at 100, page numbers at 1,000, and before/after context at 50 per
 side. Bridge JSON bodies default to 1 MiB and inbound media downloads to 512
